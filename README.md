@@ -25,8 +25,8 @@
 
 ۱. **دریافت پروژه:**
 ```bash
-git clone https://github.com/yourusername/v2ray-tester.git
-cd v2ray-tester
+git clone https://github.com/someviberdude/realyrank
+cd realyrank
 ```
 
 ۲. **نصب کتابخانه‌ها:**

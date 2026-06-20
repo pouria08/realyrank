@@ -1,0 +1,8 @@
+aiohttp>=3.9.0
+aiohttp-socks>=0.8.0
+ipwhois-python>=1.0.0
+
+# Optional (improves display and speed):
+# rich>=13.0.0
+# tqdm>=4.66.0
+# uvloop>=1.0.0

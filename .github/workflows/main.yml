@@ -40,7 +40,7 @@ jobs:
 
       - name: Run V2Ray/Xray tests
         run: |
-          python main.py --auto
+          python main.py --auto > /dev/null
 
       - name: Upload results
         if: always()

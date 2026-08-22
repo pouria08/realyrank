@@ -1,0 +1,53 @@
+name: Test V2Ray Configs
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 8 * * *"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download Xray
+        run: |
+          mkdir -p xray-linux-64
+          wget -q https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
+          unzip -o Xray-linux-64.zip -d xray-linux-64
+          chmod +x xray-linux-64/xray
+          ./xray-linux-64/xray version
+
+      - name: Prepare subscription list
+        env:
+          SUBSCRIPTION_URLS: ${{ secrets.SUBSCRIPTION_URLS }}
+        run: |
+          printf '%s\n' "$SUBSCRIPTION_URLS" > subs.txt
+          echo "Subscription list prepared."
+
+      - name: Run V2Ray/Xray tests
+        run: |
+          python main.py --auto
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2ray-test-results
+          path: |
+            working.txt
+            bad_subs.txt
+          if-no-files-found: ignore

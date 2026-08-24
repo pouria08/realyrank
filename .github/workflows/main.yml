@@ -2,68 +2,101 @@ name: Test V2Ray Configs
 
 on:
   workflow_dispatch:
+
   schedule:
-    - cron: "0 8 * * *"
+    # Every 12 hours
+    # 00:00 UTC and 12:00 UTC
+    - cron: "0 0,12 * * *"
 
 permissions:
   contents: write
 
+# Prevent multiple runs from testing/publishing
+# at the same time.
+concurrency:
+  group: realyrank-update
+  cancel-in-progress: false
+
 jobs:
+
   test:
+
     runs-on: ubuntu-latest
+
+    # Prevent a stuck test from consuming the runner forever.
+    timeout-minutes: 60
 
     steps:
 
       # =========================================================
       # 1. Checkout
       # =========================================================
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
+
 
       # =========================================================
-      # 2. Python
+      # 2. Setup Python
       # =========================================================
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
+
 
       # =========================================================
-      # 3. Dependencies
+      # 3. Install dependencies
       # =========================================================
+
       - name: Install dependencies
         run: |
+          set -e
+
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+
 
       # =========================================================
       # 4. Download Xray
       # =========================================================
+
       - name: Download Xray
         run: |
           set -e
 
           rm -rf xray-linux-64
+          rm -f Xray-linux-64.zip
+
           mkdir -p xray-linux-64
 
           wget -q \
-            https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip \
+            "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip" \
             -O Xray-linux-64.zip
 
-          unzip -o Xray-linux-64.zip -d xray-linux-64
+          unzip -q -o \
+            Xray-linux-64.zip \
+            -d xray-linux-64
 
-          chmod +x xray-linux-64/xray
+          chmod +x \
+            xray-linux-64/xray
 
+          echo "Xray version:"
           ./xray-linux-64/xray version
 
+
       # =========================================================
-      # 5. Prepare subscriptions
+      # 5. Prepare subscription sources
       # =========================================================
+
       - name: Prepare subscription list
         env:
           SUBSCRIPTION_URLS: ${{ secrets.SUBSCRIPTION_URLS }}
+
         run: |
           set -e
 
@@ -71,53 +104,122 @@ jobs:
 
           echo "Subscription list prepared."
 
-          echo "Number of subscription URLs:"
+          echo "Number of subscription sources:"
           grep -cve '^[[:space:]]*$' subs.txt || true
 
+
       # =========================================================
-      # 6. Run ALL tests
-      #
-      # Important:
-      # We disable live output because the original LiveResultWriter
-      # writes intermediate Ping/Latency results into working.txt.
-      #
-      # Everything goes into test-results.txt instead.
+      # 6. Show runner information
       # =========================================================
+
+      - name: Show runner information
+        run: |
+          echo "=========================================="
+          echo "RUNNER INFORMATION"
+          echo "=========================================="
+
+          echo "CPU:"
+          nproc
+
+          echo
+          echo "Memory:"
+          free -h
+
+          echo
+          echo "Python:"
+          python --version
+
+          echo
+          echo "Operating system:"
+          uname -a
+
+          echo
+          echo "=========================================="
+
+
+      # =========================================================
+      # 7. Run V2Ray/Xray tests
+      #
+      # IMPORTANT:
+      #
+      # main.py is responsible for the actual testing.
+      #
+      # test-results.txt contains the complete diagnostic output.
+      # working.txt is generated ONLY AFTER the test finishes.
+      # =========================================================
+
       - name: Run V2Ray/Xray tests
         run: |
           set -e
 
           rm -f working.txt
+          rm -f working.txt.tmp
           rm -f test-results.txt
 
-          python main.py \
+          echo "=========================================="
+          echo "STARTING REALYRANK"
+          echo "=========================================="
+
+          python -u main.py \
             --auto \
             --no-live-output \
             --output test-results.txt
 
+          echo
+          echo "=========================================="
+          echo "REALYRANK FINISHED"
+          echo "=========================================="
+
+
       # =========================================================
-      # 7. Build CLEAN subscription
-      #
-      # ONLY:
-      # SPEED FAST
-      #
-      # This section contains configs that:
-      #   Ping passed
-      #   Latency passed
-      #   Speed test passed
-      #   Speed >= SPEED_MIN_MBPS
-      #
-      # Since Speed is only executed after Latency,
-      # a config inside SPEED FAST has passed the previous stages too.
+      # 8. Check test output
       # =========================================================
+
+      - name: Check test results
+        if: success()
+        run: |
+          set -e
+
+          if [ ! -f test-results.txt ]; then
+            echo "ERROR: test-results.txt was not created."
+            exit 1
+          fi
+
+          echo "Test result file created successfully."
+
+          echo
+          echo "Result file size:"
+          wc -c test-results.txt
+
+          echo
+          echo "Result file lines:"
+          wc -l test-results.txt
+
+
+      # =========================================================
+      # 9. Build CLEAN subscription
+      #
+      # ONLY configs inside SPEED FAST are published.
+      #
+      # This means the config reached the final stage of the
+      # existing pipeline.
+      # =========================================================
+
       - name: Build clean working subscription
         shell: python
         run: |
+
           from pathlib import Path
           import re
+          import sys
 
           source = Path("test-results.txt")
           output = Path("working.txt")
+          temp_output = Path("working.txt.tmp")
+
+          # -----------------------------------------------------
+          # Supported protocols
+          # -----------------------------------------------------
 
           protocols = (
               "vless://",
@@ -128,7 +230,12 @@ jobs:
               "hysteria2://",
           )
 
+          # -----------------------------------------------------
+          # Check source
+          # -----------------------------------------------------
+
           if not source.exists():
+
               raise SystemExit(
                   "ERROR: test-results.txt was not created."
               )
@@ -139,83 +246,174 @@ jobs:
           )
 
           # -----------------------------------------------------
-          # Find the final SPEED FAST section
+          # Find SPEED FAST section
+          #
+          # Supports:
+          #
+          # === SPEED FAST ===
+          # === SPEED FAST ...
+          #
           # -----------------------------------------------------
+
           match = re.search(
-              r"^===\s*SPEED FAST\b.*$",
+              r"^===\s*SPEED\s+FAST\b.*$",
               text,
-              flags=re.MULTILINE
+              flags=re.MULTILINE | re.IGNORECASE
           )
 
           clean_configs = []
 
           if match:
+
               section = text[match.end():]
 
               for raw_line in section.splitlines():
 
                   line = raw_line.strip()
 
-                  # Ignore empty lines before first config
+                  # Ignore empty lines
                   if not line:
-                      if clean_configs:
-                          break
                       continue
 
-                  # Stop at another section
+                  # Stop at next report section
                   if line.startswith("==="):
                       break
 
-                  # The original output is:
+                  # -------------------------------------------------
+                  # Original report format may be:
                   #
                   # URL | latency | speed
                   #
-                  # We ONLY want the URL.
+                  # We only keep the URL.
+                  # -------------------------------------------------
+
                   url = line.split(" | ", 1)[0].strip()
+
+                  # -------------------------------------------------
+                  # Validate protocol
+                  # -------------------------------------------------
 
                   if not url.startswith(protocols):
                       continue
 
-                  # Extra safety:
-                  # Don't allow error/result text into subscription.
+                  # -------------------------------------------------
+                  # Never allow report data
+                  # -------------------------------------------------
+
                   if "|" in url:
+                      continue
+
+                  if url.startswith("="):
+                      continue
+
+                  # -------------------------------------------------
+                  # Ignore obvious diagnostic lines
+                  # -------------------------------------------------
+
+                  lower = url.lower()
+
+                  forbidden_words = (
+                      "passed",
+                      "failed",
+                      "error",
+                      "timeout",
+                      "latency",
+                      "speed",
+                      "ping",
+                      "configurations",
+                  )
+
+                  if any(
+                      word in lower
+                      for word in forbidden_words
+                      if not url.startswith(
+                          (
+                              "vless://",
+                              "vmess://",
+                              "trojan://",
+                              "ss://",
+                              "hy2://",
+                              "hysteria2://",
+                          )
+                      )
+                  ):
                       continue
 
                   clean_configs.append(url)
 
           # -----------------------------------------------------
-          # Remove duplicates while preserving order
+          # Remove duplicates
+          #
+          # Preserve original order.
           # -----------------------------------------------------
-          unique_configs = list(dict.fromkeys(clean_configs))
+
+          unique_configs = list(
+              dict.fromkeys(clean_configs)
+          )
 
           # -----------------------------------------------------
-          # Write CLEAN subscription
+          # Atomic output
+          #
+          # Don't replace working.txt until the new file is ready.
           # -----------------------------------------------------
-          output.write_text(
-              "\n".join(unique_configs) + (
-                  "\n" if unique_configs else ""
+
+          temp_output.write_text(
+              (
+                  "\n".join(unique_configs)
+                  + ("\n" if unique_configs else "")
               ),
               encoding="utf-8"
           )
 
+          temp_output.replace(output)
+
+          # -----------------------------------------------------
+          # Report
+          # -----------------------------------------------------
+
+          print()
           print("=" * 70)
           print("CLEAN SUBSCRIPTION")
           print("=" * 70)
-          print(f"Qualified configs: {len(unique_configs)}")
+
+          print(
+              f"Qualified configs: {len(unique_configs)}"
+          )
+
           print()
 
-          for index, config in enumerate(unique_configs, 1):
-              print(f"{index:04d}  {config}")
+          if unique_configs:
+
+              for index, config in enumerate(
+                  unique_configs,
+                  1
+              ):
+
+                  # Don't print the entire config to logs.
+                  # Just show the index.
+                  print(
+                      f"{index:04d}  {config[:100]}"
+                  )
+
+          else:
+
+              print(
+                  "WARNING: No SPEED FAST configs found."
+              )
 
           print()
           print("=" * 70)
 
+
       # =========================================================
-      # 8. Validate clean output
+      # 10. Validate clean subscription
       # =========================================================
+
       - name: Validate working.txt
+        if: success()
         shell: bash
         run: |
+
           set -e
 
           if [ ! -f working.txt ]; then
@@ -233,105 +431,197 @@ jobs:
           echo "Final working configs: $TOTAL"
 
           # -----------------------------------------------------
-          # Make sure no report sections exist
+          # Check for report sections
           # -----------------------------------------------------
-          if grep -Eq '^===|PING PASSED|LATENCY PASSED|SPEED SLOW|SPEED FAST' working.txt; then
-            echo "ERROR: working.txt still contains test-report data."
+
+          if grep -Eq \
+            '^===|PING PASSED|LATENCY PASSED|SPEED SLOW|SPEED FAST' \
+            working.txt
+          then
+
+            echo
+            echo "ERROR: working.txt contains test-report data."
+
             exit 1
+
           fi
 
           # -----------------------------------------------------
-          # Make sure every line is a supported proxy URL
+          # Validate protocols
           # -----------------------------------------------------
+
           if [ "$TOTAL" -gt 0 ]; then
-            if grep -Ev '^(vless|vmess|trojan|ss|hy2|hysteria2)://' working.txt; then
-              echo "ERROR: Invalid data found in working.txt."
+
+            INVALID=$(grep -Ev \
+              '^(vless|vmess|trojan|ss|hy2|hysteria2)://' \
+              working.txt || true)
+
+            if [ -n "$INVALID" ]; then
+
+              echo
+              echo "ERROR: Invalid data found:"
+              echo "$INVALID"
+
               exit 1
+
             fi
+
           fi
 
           # -----------------------------------------------------
-          # Make sure no duplicate configs exist
+          # Detect duplicates
           # -----------------------------------------------------
-          DUPLICATES=$(sort working.txt | uniq -d | wc -l)
+
+          DUPLICATES=$(
+            sort working.txt |
+            uniq -d |
+            wc -l
+          )
 
           if [ "$DUPLICATES" -ne 0 ]; then
+
+            echo
             echo "ERROR: Duplicate configs found."
+
+            sort working.txt |
+            uniq -d
+
             exit 1
+
           fi
 
           echo
           echo "Validation successful."
+
+          echo
           echo "Only final qualified configs will be published."
 
           echo
           echo "First 10 configs:"
           head -n 10 working.txt || true
 
+          echo
+          echo "=========================================="
+
+
       # =========================================================
-      # 9. Prepare GitHub Pages
+      # 11. Prepare GitHub Pages
       # =========================================================
+
       - name: Prepare GitHub Pages
+        if: success()
         run: |
+
           set -e
 
           rm -rf public
+
           mkdir -p public
 
+          # -----------------------------------------------------
           # ONLY CLEAN SUBSCRIPTION
+          # -----------------------------------------------------
+
           cp working.txt public/working.txt
 
-          # Bad subscriptions remain available for debugging,
-          # but they are NOT part of the subscription.
+          # -----------------------------------------------------
+          # Optional diagnostics
+          #
+          # bad_subs.txt is NOT part of working.txt.
+          # -----------------------------------------------------
+
           if [ -f bad_subs.txt ]; then
-            cp bad_subs.txt public/bad_subs.txt
+
+            cp \
+              bad_subs.txt \
+              public/bad_subs.txt
+
           fi
 
-          # Simple index page
+          # -----------------------------------------------------
+          # Index page
+          # -----------------------------------------------------
+
           cat > public/index.html <<'EOF'
           <!DOCTYPE html>
           <html lang="en">
+
           <head>
+
             <meta charset="UTF-8">
-            <meta name="robots" content="noindex,nofollow">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <title>V2Ray Subscription</title>
+
+            <meta
+              name="viewport"
+              content="width=device-width, initial-scale=1"
+            >
+
+            <meta
+              name="robots"
+              content="noindex,nofollow"
+            >
+
+            <title>RealYRank Subscription</title>
+
           </head>
 
           <body>
-            <h1>V2Ray Subscription</h1>
-            <p>Automatically updated.</p>
+
+            <h1>RealYRank Subscription</h1>
+
+            <p>
+              Automatically updated every 12 hours.
+            </p>
+
+            <p>
+              Only final tested configurations are published.
+            </p>
 
             <p>
               <a href="./working.txt">
-                Download working subscription
+                Working Subscription
               </a>
             </p>
+
           </body>
+
           </html>
           EOF
 
-      # =========================================================
-      # 10. Publish
-      # =========================================================
-      - name: Publish subscription to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./public
-          publish_branch: gh-pages
-          force_orphan: true
 
       # =========================================================
-      # 11. Upload diagnostic results
+      # 12. Publish GitHub Pages
       # =========================================================
+
+      - name: Publish subscription to GitHub Pages
+        if: success()
+        uses: peaceiris/actions-gh-pages@v4
+
+        with:
+
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+          publish_dir: ./public
+
+          publish_branch: gh-pages
+
+          force_orphan: true
+
+
+      # =========================================================
+      # 13. Upload diagnostic results
+      # =========================================================
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
+
         with:
+
           name: v2ray-test-results
+
           path: |
             test-results.txt
             working.txt
             bad_subs.txt
+
           if-no-files-found: ignore

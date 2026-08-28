@@ -90,26 +90,7 @@ jobs:
 
 
       # =========================================================
-      # 5. Prepare subscription sources
-      # =========================================================
-
-      - name: Prepare subscription list
-        env:
-          SUBSCRIPTION_URLS: ${{ secrets.SUBSCRIPTION_URLS }}
-
-        run: |
-          set -e
-
-          printf '%s\n' "$SUBSCRIPTION_URLS" > subs.txt
-
-          echo "Subscription list prepared."
-
-          echo "Number of subscription sources:"
-          grep -cve '^[[:space:]]*$' subs.txt || true
-
-
-      # =========================================================
-      # 6. Show runner information
+      # 5. Show runner information
       # =========================================================
 
       - name: Show runner information
@@ -138,7 +119,7 @@ jobs:
 
 
       # =========================================================
-      # 7. Run V2Ray/Xray tests
+      # 6. Run V2Ray/Xray tests
       #
       # IMPORTANT:
       #
@@ -172,7 +153,7 @@ jobs:
 
 
       # =========================================================
-      # 8. Check test output
+      # 7. Check test output
       # =========================================================
 
       - name: Check test results
@@ -197,7 +178,7 @@ jobs:
 
 
       # =========================================================
-      # 9. Build CLEAN subscription
+      # 8. Build CLEAN subscription
       #
       # ONLY configs inside SPEED FAST are published.
       #
@@ -406,7 +387,7 @@ jobs:
 
 
       # =========================================================
-      # 10. Validate clean subscription
+      # 9. Validate clean subscription
       # =========================================================
 
       - name: Validate working.txt
@@ -505,7 +486,7 @@ jobs:
 
 
       # =========================================================
-      # 11. Prepare GitHub Pages
+      # 10. Prepare GitHub Pages
       # =========================================================
 
       - name: Prepare GitHub Pages
@@ -589,7 +570,7 @@ jobs:
 
 
       # =========================================================
-      # 12. Publish GitHub Pages
+      # 11. Publish GitHub Pages
       # =========================================================
 
       - name: Publish subscription to GitHub Pages
@@ -608,7 +589,7 @@ jobs:
 
 
       # =========================================================
-      # 13. Upload diagnostic results
+      # 12. Upload diagnostic results
       # =========================================================
 
       - name: Upload test results

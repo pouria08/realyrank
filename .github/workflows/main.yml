@@ -1,12 +1,14 @@
+```yaml
 name: Test V2Ray Configs
 
 on:
   workflow_dispatch:
 
   schedule:
-    # Every 12 hours
-    # 00:00 UTC and 12:00 UTC
-    - cron: "0 0,12 * * *"
+    # Every 3 hours at minute 37
+    # 00:37, 03:37, 06:37, 09:37,
+    # 12:37, 15:37, 18:37, 21:37 UTC
+    - cron: "37 */3 * * *"
 
 permissions:
   contents: write
@@ -121,8 +123,6 @@ jobs:
       # =========================================================
       # 6. Run V2Ray/Xray tests
       #
-      # IMPORTANT:
-      #
       # main.py is responsible for the actual testing.
       #
       # test-results.txt contains the complete diagnostic output.
@@ -181,9 +181,6 @@ jobs:
       # 8. Build CLEAN subscription
       #
       # ONLY configs inside SPEED FAST are published.
-      #
-      # This means the config reached the final stage of the
-      # existing pipeline.
       # =========================================================
 
       - name: Build clean working subscription
@@ -228,12 +225,6 @@ jobs:
 
           # -----------------------------------------------------
           # Find SPEED FAST section
-          #
-          # Supports:
-          #
-          # === SPEED FAST ===
-          # === SPEED FAST ...
-          #
           # -----------------------------------------------------
 
           match = re.search(
@@ -324,8 +315,6 @@ jobs:
 
           # -----------------------------------------------------
           # Remove duplicates
-          #
-          # Preserve original order.
           # -----------------------------------------------------
 
           unique_configs = list(
@@ -334,8 +323,6 @@ jobs:
 
           # -----------------------------------------------------
           # Atomic output
-          #
-          # Don't replace working.txt until the new file is ready.
           # -----------------------------------------------------
 
           temp_output.write_text(
@@ -371,7 +358,7 @@ jobs:
               ):
 
                   # Don't print the entire config to logs.
-                  # Just show the index.
+                  # Just show the index and first 100 chars.
                   print(
                       f"{index:04d}  {config[:100]}"
                   )
@@ -383,7 +370,7 @@ jobs:
               )
 
           print()
-          print("=" * 70)
+          print("=" * 70
 
 
       # =========================================================
@@ -550,7 +537,7 @@ jobs:
             <h1>RealYRank Subscription</h1>
 
             <p>
-              Automatically updated every 12 hours.
+              Automatically updated every 3 hours.
             </p>
 
             <p>
@@ -606,3 +593,4 @@ jobs:
             bad_subs.txt
 
           if-no-files-found: ignore
+```
